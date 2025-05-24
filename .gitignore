@@ -1,0 +1,22 @@
+# Ignorar carpeta del entorno virtual
+venv/
+env/
+.env/
+
+# Archivos de Python compilados
+__pycache__/
+*.py[cod]
+
+# Archivos de logs y bases de datos temporales
+*.log
+*.sqlite3
+
+# Configuración de editor y sistema
+.vscode/
+.idea/
+.DS_Store
+
+# Otros
+*.egg-info/
+dist/
+build/
