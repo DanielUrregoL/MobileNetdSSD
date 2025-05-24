@@ -17,7 +17,6 @@ def model(target_classes: list[str], stop_event=None):
     net = cv2.dnn.readNetFromCaffe("model/MobileNetSSD_deploy.prototxt", "model/MobileNetSSD_deploy.caffemodel")
     cap = cv2.VideoCapture(0)
 
-    # ✅ Bucle controlado por evento de parada
     while not stop_event.is_set():
         ret, frame = cap.read()
         if not ret:
@@ -54,4 +53,40 @@ def model(target_classes: list[str], stop_event=None):
     # Cleanup
     cap.release()
     cv2.destroyAllWindows()
-    print("detección finalizada correctamente")
+
+
+def detect_objects_in_frame(frame, target_classes: list[str]):
+    net = cv2.dnn.readNetFromCaffe(
+        "model/MobileNetSSD_deploy.prototxt",
+        "model/MobileNetSSD_deploy.caffemodel"
+    )
+
+    h, w = frame.shape[:2]
+    blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)),
+                                 0.007843, (300, 300), 127.5)
+    net.setInput(blob)
+    detections = net.forward()
+
+    results = []
+    for i in range(detections.shape[2]):
+        confidence = detections[0, 0, i, 2]
+        if confidence > 0.5:
+            idx = int(detections[0, 0, i, 1])
+            label = ALL_CLASSES[idx]
+
+            if label not in target_classes:
+                continue
+
+            box = detections[0, 0, i, 3:7] * [w, h, w, h]
+            (startX, startY, endX, endY) = box.astype("int")
+            results.append({
+                "label": label,
+                "confidence": float(confidence),
+                "x": int(startX),
+                "y": int(startY),
+                "w": int(endX - startX),
+                "h": int(endY - startY),
+            })
+
+    return results
+

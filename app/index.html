@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Object Detection Control</title>
+  <title>Real-Time Object Detection</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <style>
     body {
@@ -11,63 +12,76 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
       padding: 20px;
       background: #f5f5f5;
     }
+
+    #video-container {
+      position: relative;
+      width: 640px;
+      height: 480px;
+    }
+
+    video,
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 640px;
+      height: 480px;
+      border-radius: 10px;
+    }
+
     .categories {
       display: flex;
       flex-wrap: wrap;
-      gap: 15px;
+      gap: 10px;
+      margin: 20px 0;
       max-width: 800px;
-      margin-bottom: 40px;
-    }
-    .category {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
       justify-content: center;
-      width: 100px;
-      height: 100px;
-      background: white;
+    }
+
+    .category {
+      padding: 5px 10px;
       border: 2px solid #ccc;
-      border-radius: 10px;
+      border-radius: 5px;
       cursor: pointer;
+      background-color: white;
       transition: all 0.3s ease;
     }
+
     .category.selected {
       border-color: #007bff;
       background-color: #e7f0ff;
     }
-    .category i {
-      font-size: 24px;
-      margin-bottom: 5px;
-    }
+
     #startBtn {
-      padding: 15px 30px;
-      font-size: 18px;
-      border: none;
-      border-radius: 5px;
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-size: 16px;
       background-color: #007bff;
       color: white;
+      border: none;
+      border-radius: 5px;
       cursor: pointer;
-      transition: background-color 0.3s ease;
     }
+
     #startBtn.active {
       background-color: #dc3545;
     }
-    #startBtn:hover {
-      background-color: #0056b3;
-    }
-    #startBtn.active:hover {
-      background-color: #c82333;
-    }
   </style>
 </head>
+
 <body>
-  <div class="categories" id="categories">
-    <!-- Categories will be generated dynamically -->
+  <h1>Real-Time Object Detection</h1>
+
+  <div class="categories" id="categories"></div>
+
+  <div id="video-container">
+    <video id="video" autoplay muted></video>
+    <canvas id="overlay"></canvas>
   </div>
+
   <button id="startBtn">Start Detection</button>
 
   <script>
@@ -77,62 +91,102 @@
       "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"
     ];
 
-    const icons = {
-      aeroplane: "fa-plane", bicycle: "fa-bicycle", bird: "fa-dove",
-      boat: "fa-ship", bottle: "fa-wine-bottle", bus: "fa-bus", car: "fa-car",
-      cat: "fa-cat", chair: "fa-chair", cow: "fa-cow", diningtable: "fa-table",
-      dog: "fa-dog", horse: "fa-horse", motorbike: "fa-motorcycle", person: "fa-user",
-      pottedplant: "fa-seedling", sheep: "fa-hippo", sofa: "fa-couch",
-      train: "fa-train", tvmonitor: "fa-tv"
-    };
-
     const container = document.getElementById("categories");
+    const video = document.getElementById("video");
+    const overlay = document.getElementById("overlay");
+    const ctx = overlay.getContext("2d");
     const startBtn = document.getElementById("startBtn");
-    let isDetecting = false;
 
-    categories.forEach(category => {
+    let isDetecting = false;
+    let selectedTargets = [];
+
+    categories.forEach(cat => {
       const div = document.createElement("div");
       div.className = "category";
-      div.dataset.name = category;
-      div.innerHTML = `<i class="fas ${icons[category] || 'fa-box'}"></i><span>${category}</span>`;
+      div.dataset.name = cat;
+      div.innerText = cat;
       div.addEventListener("click", () => {
         div.classList.toggle("selected");
       });
       container.appendChild(div);
     });
 
-    startBtn.addEventListener("click", () => {
-      if (!isDetecting) {
-        const selected = Array.from(document.querySelectorAll(".category.selected"))
-                              .map(el => el.dataset.name);
-
-        fetch("/start_detection", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ targets: selected })
-        })
-        .then(res => res.json())
-        .then(data => {
-          isDetecting = true;
-          startBtn.textContent = "Stop Detection";
-          startBtn.classList.add("active");
-        })
-        .catch(err => alert("Error: " + err));
-      } else {
-        fetch("/stop_detection", {
-          method: "POST"
-        })
-        .then(res => res.json())
-        .then(data => {
-          isDetecting = false;
-          startBtn.textContent = "Start Detection";
-          startBtn.classList.remove("active");
-        })
-        .catch(err => alert("Error: " + err));
+    async function setupCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+        return new Promise(resolve => {
+          video.onloadedmetadata = () => resolve();
+        });
+      } catch (err) {
+        alert("Camera access denied.");
+        console.error(err);
       }
+    }
+
+    async function sendFrame() {
+      if (!isDetecting) return;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const tempCtx = canvas.getContext('2d');
+      tempCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'));
+      const formData = new FormData();
+      formData.append('frame', blob, 'frame.jpg');
+      formData.append('targets', JSON.stringify(selectedTargets));
+
+      fetch('/detect_frame', {
+        method: 'POST',
+        body: formData
+      })
+        .then(res => res.json())
+        .then(data => {
+          drawDetections(data.detections || []);
+        })
+        .catch(err => console.error('Detection error:', err));
+
+      setTimeout(sendFrame, 200);
+    }
+
+    function drawDetections(detections) {
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      detections.forEach(obj => {
+        const { x, y, w, h, label, confidence } = obj;
+
+        ctx.strokeStyle = '#00FF00';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+        ctx.font = "16px Arial";
+        ctx.fillStyle = "#00FF00";
+        ctx.fillText(`${label} ${(confidence * 100).toFixed(1)}%`, x + 4, y + 18);
+      });
+    }
+
+
+
+    startBtn.addEventListener('click', () => {
+      selectedTargets = Array.from(document.querySelectorAll(".category.selected"))
+        .map(el => el.dataset.name);
+
+      if (selectedTargets.length === 0) {
+        alert("Select at least one category.");
+        return;
+      }
+
+      isDetecting = !isDetecting;
+      startBtn.textContent = isDetecting ? 'Stop Detection' : 'Start Detection';
+      startBtn.classList.toggle('active');
+      if (isDetecting) sendFrame();
+    });
+
+    setupCamera().then(() => {
+      overlay.width = video.videoWidth;
+      overlay.height = video.videoHeight;
     });
   </script>
 </body>
+
 </html>

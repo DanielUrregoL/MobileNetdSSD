@@ -1,13 +1,15 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from multiprocessing import Process, Event
-from app.model import model
+from app.model import detect_objects_in_frame,model
+import numpy as np
+import cv2
+import json
 
 app = FastAPI()
 
-# CORS para desarrollo local
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,24 +17,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Modelo para recibir objetivos
 class TargetRequest(BaseModel):
     targets: list[str]
 
-# Control del proceso
 detection_process = None
 stop_event = Event()
 
-# Lógica para correr el modelo en otro proceso
 def run_model(targets):
     model(targets, stop_event=stop_event)
 
-# Servir archivo HTML en "/"
 @app.get("/")
 def serve_index():
     return FileResponse("app/index.html", media_type="text/html")
 
-# Endpoints de API
 @app.post("/start_detection")
 def start_detection(req: TargetRequest):
     global detection_process, stop_event
@@ -57,4 +54,16 @@ def stop_detection():
     detection_process = None
     return {"message": "Detección detenida"}
 
+@app.post("/detect_frame")
+async def detect_frame(frame: UploadFile = File(...), targets: str = Form(...)):
+    contents = await frame.read()
+    np_arr = np.frombuffer(contents, np.uint8)
+    img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
+    try:
+        selected_targets = json.loads(targets)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Formato de 'targets' inválido")
+    
+    detections = detect_objects_in_frame(img, selected_targets)
+    return {"detections": detections}
